@@ -14,13 +14,108 @@
 </style>
 </head>
 <body>
-<div id="info">Use WASD para andar, mouse para olhar, clique para colocar/remover blocos</div>
-<script src="https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.155.0/examples/js/controls/PointerLockControls.js"></script>
+<div id="info">Clique na tela para ativar o mouse. Use WASD para andar, mouse para olhar. Botão esquerdo para remover bloco, direito para adicionar bloco.</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.148.0/build/three.min.js"></script>
 
 <script>
+  // PointerLockControls embutido, adaptado para funcionar diretamente
+  class PointerLockControls {
+    constructor(camera, domElement) {
+      this.camera = camera;
+      this.domElement = domElement || document.body;
+
+      this.isLocked = false;
+
+      this.pitchObject = new THREE.Object3D();
+      this.pitchObject.add(camera);
+
+      this.yawObject = new THREE.Object3D();
+      this.yawObject.position.y = 1.6;
+      this.yawObject.add(this.pitchObject);
+
+      this.PI_2 = Math.PI / 2;
+
+      this.minPolarAngle = 0;
+      this.maxPolarAngle = Math.PI;
+
+      this._onMouseMove = this.onMouseMove.bind(this);
+      this._onPointerlockChange = this.onPointerlockChange.bind(this);
+      this._onPointerlockError = this.onPointerlockError.bind(this);
+
+      this.connect();
+    }
+
+    connect() {
+      document.addEventListener('mousemove', this._onMouseMove, false);
+      document.addEventListener('pointerlockchange', this._onPointerlockChange, false);
+      document.addEventListener('pointerlockerror', this._onPointerlockError, false);
+    }
+
+    disconnect() {
+      document.removeEventListener('mousemove', this._onMouseMove, false);
+      document.removeEventListener('pointerlockchange', this._onPointerlockChange, false);
+      document.removeEventListener('pointerlockerror', this._onPointerlockError, false);
+    }
+
+    dispose() {
+      this.disconnect();
+    }
+
+    onPointerlockChange() {
+      this.isLocked = document.pointerLockElement === this.domElement;
+    }
+
+    onPointerlockError() {
+      console.error('PointerLockControls: PointerLock Error');
+    }
+
+    onMouseMove(event) {
+      if (!this.isLocked) return;
+
+      const movementX = event.movementX || 0;
+      const movementY = event.movementY || 0;
+
+      this.yawObject.rotation.y -= movementX * 0.002;
+      this.pitchObject.rotation.x -= movementY * 0.002;
+
+      this.pitchObject.rotation.x = Math.max(-this.PI_2, Math.min(this.PI_2, this.pitchObject.rotation.x));
+    }
+
+    getObject() {
+      return this.yawObject;
+    }
+
+    getDirection() {
+      const direction = new THREE.Vector3(0, 0, -1);
+      const rotation = new THREE.Euler(this.pitchObject.rotation.x, this.yawObject.rotation.y, 0, 'YXZ');
+      direction.applyEuler(rotation);
+      return direction;
+    }
+
+    moveForward(distance) {
+      const dir = this.getDirection();
+      this.yawObject.position.addScaledVector(dir, distance);
+    }
+
+    moveRight(distance) {
+      const dir = this.getDirection();
+      dir.cross(this.camera.up);
+      this.yawObject.position.addScaledVector(dir, distance);
+    }
+
+    lock() {
+      this.domElement.requestPointerLock();
+    }
+
+    unlock() {
+      document.exitPointerLock();
+    }
+  }
+
+  // Setup Three.js
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x87ceeb); // Céu azul
+  scene.background = new THREE.Color(0x87ceeb);
 
   const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
 
@@ -28,16 +123,15 @@
   renderer.setSize(window.innerWidth, window.innerHeight);
   document.body.appendChild(renderer.domElement);
 
-  // Luz ambiente e direcional
-  const light = new THREE.DirectionalLight(0xffffff, 1);
-  light.position.set(10, 20, 10);
-  scene.add(light);
+  // Luz
+  const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+  directionalLight.position.set(10, 20, 10);
+  scene.add(directionalLight);
+  scene.add(new THREE.AmbientLight(0x404040));
 
-  const ambient = new THREE.AmbientLight(0x404040);
-  scene.add(ambient);
-
-  // Controle de primeira pessoa com mouse
-  const controls = new THREE.PointerLockControls(camera, document.body);
+  // Controles
+  const controls = new PointerLockControls(camera, document.body);
+  scene.add(controls.getObject());
 
   document.body.addEventListener('click', () => {
     controls.lock();
@@ -65,24 +159,18 @@
     }
   });
 
-  // Criar chão com blocos (10x1x10)
+  // Blocos
   const blockSize = 1;
   const blocks = {};
   const blockGeometry = new THREE.BoxGeometry(blockSize, blockSize, blockSize);
-  const blockMaterial = new THREE.MeshLambertMaterial({color: 0x8B4513}); // Marrom (terra)
-
-  for(let x = -5; x < 5; x++){
-    for(let z = -5; z < 5; z++){
-      addBlock(x, 0, z);
-    }
-  }
+  const blockMaterial = new THREE.MeshLambertMaterial({color: 0x8B4513});
 
   function posToKey(x,y,z) {
     return `${x},${y},${z}`;
   }
 
   function addBlock(x, y, z) {
-    if(blocks[posToKey(x,y,z)]) return; // já existe
+    if(blocks[posToKey(x,y,z)]) return;
     const block = new THREE.Mesh(blockGeometry, blockMaterial.clone());
     block.position.set(x * blockSize + blockSize/2, y * blockSize + blockSize/2, z * blockSize + blockSize/2);
     scene.add(block);
@@ -97,28 +185,33 @@
     }
   }
 
-  // Raycaster para interagir com blocos
-  const raycaster = new THREE.Raycaster();
-  const mouse = new THREE.Vector2();
+  // Criar chão inicial 10x10
+  for(let x = -5; x < 5; x++){
+    for(let z = -5; z < 5; z++){
+      addBlock(x, 0, z);
+    }
+  }
 
-  // Clique para adicionar/remover bloco
+  // Raycaster para clicar nos blocos
+  const raycaster = new THREE.Raycaster();
+
   window.addEventListener('mousedown', e => {
     if(!controls.isLocked) return;
 
-    raycaster.setFromCamera(new THREE.Vector2(0, 0), camera); // centro da tela
+    raycaster.setFromCamera(new THREE.Vector2(0, 0), camera);
 
     const intersects = raycaster.intersectObjects(Object.values(blocks));
     if(intersects.length > 0) {
       const intersect = intersects[0];
       if(e.button === 0) {
-        // botão esquerdo - remover bloco
+        // esquerdo = remove bloco clicado
         const pos = intersect.object.position;
         const x = Math.floor(pos.x);
         const y = Math.floor(pos.y);
         const z = Math.floor(pos.z);
         removeBlock(x, y, z);
       } else if(e.button === 2) {
-        // botão direito - adicionar bloco na face clicada
+        // direito = adiciona bloco na face clicada
         const normal = intersect.face.normal;
         const pos = intersect.object.position;
         const x = Math.floor(pos.x + normal.x);
@@ -129,9 +222,9 @@
     }
   });
 
-  window.addEventListener('contextmenu', e => e.preventDefault()); // evitar menu do botão direito
+  window.addEventListener('contextmenu', e => e.preventDefault());
 
-  // Loop de animação
+  // Animação e movimento
   const clock = new THREE.Clock();
 
   function animate() {
@@ -139,6 +232,7 @@
 
     if(controls.isLocked){
       const delta = clock.getDelta();
+
       velocity.x -= velocity.x * 10.0 * delta;
       velocity.z -= velocity.z * 10.0 * delta;
 
@@ -158,12 +252,12 @@
 
   animate();
 
-  // Ajustar tela
   window.addEventListener('resize', () => {
     camera.aspect = window.innerWidth/window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
   });
+
 </script>
 </body>
 </html>
