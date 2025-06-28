@@ -1,54 +1,169 @@
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
-  <meta charset="UTF-8" />
-  <title>Cubo 3D com Three.js</title>
-  <style>
-    body { margin: 0; overflow: hidden; }
-    canvas { display: block; }
-  </style>
+<meta charset="UTF-8" />
+<title>Mini Minecraft 3D</title>
+<style>
+  body { margin: 0; overflow: hidden; }
+  canvas { display: block; }
+  #info {
+    position: absolute; top: 10px; width: 100%; text-align: center;
+    color: white; font-family: Arial; font-size: 16px;
+    z-index: 1;
+  }
+</style>
 </head>
 <body>
-  <script src="https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.min.js"></script>
-  <script>
-    // Criar a cena
-    const scene = new THREE.Scene();
+<div id="info">Use WASD para andar, mouse para olhar, clique para colocar/remover blocos</div>
+<script src="https://cdn.jsdelivr.net/npm/three@0.155.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.155.0/examples/js/controls/PointerLockControls.js"></script>
 
-    // Criar a câmera (fov, aspect ratio, near, far)
-    const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
+<script>
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x87ceeb); // Céu azul
 
-    // Criar o renderizador
-    const renderer = new THREE.WebGLRenderer({antialias: true});
-    renderer.setSize(window.innerWidth, window.innerHeight);
-    document.body.appendChild(renderer.domElement);
+  const camera = new THREE.PerspectiveCamera(75, window.innerWidth/window.innerHeight, 0.1, 1000);
 
-    // Criar um cubo (geometria + material)
-    const geometry = new THREE.BoxGeometry(1, 1, 1);
-    const material = new THREE.MeshNormalMaterial();
-    const cube = new THREE.Mesh(geometry, material);
-    scene.add(cube);
+  const renderer = new THREE.WebGLRenderer({antialias: true});
+  renderer.setSize(window.innerWidth, window.innerHeight);
+  document.body.appendChild(renderer.domElement);
 
-    // Posicionar a câmera para ver o cubo
-    camera.position.z = 3;
+  // Luz ambiente e direcional
+  const light = new THREE.DirectionalLight(0xffffff, 1);
+  light.position.set(10, 20, 10);
+  scene.add(light);
 
-    // Função de animação para girar o cubo
-    function animate() {
-      requestAnimationFrame(animate);
+  const ambient = new THREE.AmbientLight(0x404040);
+  scene.add(ambient);
 
-      cube.rotation.x += 0.01;
-      cube.rotation.y += 0.01;
+  // Controle de primeira pessoa com mouse
+  const controls = new THREE.PointerLockControls(camera, document.body);
 
-      renderer.render(scene, camera);
+  document.body.addEventListener('click', () => {
+    controls.lock();
+  });
+
+  // Movimento
+  const move = { forward: false, backward: false, left: false, right: false };
+  const velocity = new THREE.Vector3();
+
+  document.addEventListener('keydown', e => {
+    switch(e.code){
+      case 'KeyW': move.forward = true; break;
+      case 'KeyS': move.backward = true; break;
+      case 'KeyA': move.left = true; break;
+      case 'KeyD': move.right = true; break;
+    }
+  });
+
+  document.addEventListener('keyup', e => {
+    switch(e.code){
+      case 'KeyW': move.forward = false; break;
+      case 'KeyS': move.backward = false; break;
+      case 'KeyA': move.left = false; break;
+      case 'KeyD': move.right = false; break;
+    }
+  });
+
+  // Criar chão com blocos (10x1x10)
+  const blockSize = 1;
+  const blocks = {};
+  const blockGeometry = new THREE.BoxGeometry(blockSize, blockSize, blockSize);
+  const blockMaterial = new THREE.MeshLambertMaterial({color: 0x8B4513}); // Marrom (terra)
+
+  for(let x = -5; x < 5; x++){
+    for(let z = -5; z < 5; z++){
+      addBlock(x, 0, z);
+    }
+  }
+
+  function posToKey(x,y,z) {
+    return `${x},${y},${z}`;
+  }
+
+  function addBlock(x, y, z) {
+    if(blocks[posToKey(x,y,z)]) return; // já existe
+    const block = new THREE.Mesh(blockGeometry, blockMaterial.clone());
+    block.position.set(x * blockSize + blockSize/2, y * blockSize + blockSize/2, z * blockSize + blockSize/2);
+    scene.add(block);
+    blocks[posToKey(x,y,z)] = block;
+  }
+
+  function removeBlock(x, y, z) {
+    const key = posToKey(x,y,z);
+    if(blocks[key]){
+      scene.remove(blocks[key]);
+      delete blocks[key];
+    }
+  }
+
+  // Raycaster para interagir com blocos
+  const raycaster = new THREE.Raycaster();
+  const mouse = new THREE.Vector2();
+
+  // Clique para adicionar/remover bloco
+  window.addEventListener('mousedown', e => {
+    if(!controls.isLocked) return;
+
+    raycaster.setFromCamera(new THREE.Vector2(0, 0), camera); // centro da tela
+
+    const intersects = raycaster.intersectObjects(Object.values(blocks));
+    if(intersects.length > 0) {
+      const intersect = intersects[0];
+      if(e.button === 0) {
+        // botão esquerdo - remover bloco
+        const pos = intersect.object.position;
+        const x = Math.floor(pos.x);
+        const y = Math.floor(pos.y);
+        const z = Math.floor(pos.z);
+        removeBlock(x, y, z);
+      } else if(e.button === 2) {
+        // botão direito - adicionar bloco na face clicada
+        const normal = intersect.face.normal;
+        const pos = intersect.object.position;
+        const x = Math.floor(pos.x + normal.x);
+        const y = Math.floor(pos.y + normal.y);
+        const z = Math.floor(pos.z + normal.z);
+        addBlock(x, y, z);
+      }
+    }
+  });
+
+  window.addEventListener('contextmenu', e => e.preventDefault()); // evitar menu do botão direito
+
+  // Loop de animação
+  const clock = new THREE.Clock();
+
+  function animate() {
+    requestAnimationFrame(animate);
+
+    if(controls.isLocked){
+      const delta = clock.getDelta();
+      velocity.x -= velocity.x * 10.0 * delta;
+      velocity.z -= velocity.z * 10.0 * delta;
+
+      const speed = 5.0;
+
+      if(move.forward) velocity.z -= speed * delta;
+      if(move.backward) velocity.z += speed * delta;
+      if(move.left) velocity.x -= speed * delta;
+      if(move.right) velocity.x += speed * delta;
+
+      controls.moveRight(-velocity.x * delta);
+      controls.moveForward(-velocity.z * delta);
     }
 
-    animate();
+    renderer.render(scene, camera);
+  }
 
-    // Ajustar o canvas ao redimensionar a janela
-    window.addEventListener('resize', () => {
-      camera.aspect = window.innerWidth/window.innerHeight;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-    });
-  </script>
+  animate();
+
+  // Ajustar tela
+  window.addEventListener('resize', () => {
+    camera.aspect = window.innerWidth/window.innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(window.innerWidth, window.innerHeight);
+  });
+</script>
 </body>
 </html>
